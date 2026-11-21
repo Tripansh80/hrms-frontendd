@@ -1,296 +1,366 @@
 "use client";
 
-import { useAuthStore } from "@/store/authStore";
-import {
-  Sparkles,
-  Users,
-  Calendar,
-  CheckCircle2,
-  Clock,
-  Briefcase,
-  ArrowUpRight,
-  ShieldCheck,
-  Check,
-  X,
-} from "lucide-react";
-import { useState } from "react";
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowUpRight,
+  BarChart3,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  FilePlus2,
+  Search,
+  Settings2,
+  ShieldCheck,
+  UserPlus,
+  Users,
+} from "lucide-react";
+
+import { api } from "@/lib/api";
+import { useAuthStore } from "@/store/authStore";
+import { Button } from "@/components/ui/Button";
+import { Card, StatCard } from "@/components/ui/Card";
+import { Input } from "@/components/ui/Input";
+
+type Employee = {
+  id: string;
+  employee_no: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  designation: string | null;
+  status: "onboarding" | "active" | "on_notice" | "suspended" | "exited";
+  joining_date: string;
+  department_name: string | null;
+  invitation_status: "not_invited" | "invited" | "active";
+};
+
+type EmployeesResponse = {
+  items: Employee[];
+  next_cursor: string | null;
+};
+
+type DashboardResponse = {
+  generated_at: string;
+  widgets: {
+    kpis?: { active_employees?: number };
+    hiring_funnel?: { status: "not_available" };
+    people_cost?: { status: "not_available" };
+  };
+};
+
+type DashboardView = "admin" | "hr" | "manager" | "employee";
+type AvailableDashboardsResponse = { dashboards: DashboardView[]; default: DashboardView | null };
+
+const statusStyles: Record<Employee["status"], string> = {
+  active: "bg-success-soft text-success",
+  onboarding: "bg-ai-soft text-ai",
+  on_notice: "bg-warning-soft text-warning",
+  suspended: "bg-danger-soft text-danger",
+  exited: "bg-muted text-muted-foreground",
+};
+
+const invitationStyles: Record<Employee["invitation_status"], string> = {
+  active: "text-success",
+  invited: "text-warning",
+  not_invited: "text-muted-foreground",
+};
+
+function initials(employee: Employee) {
+  return `${employee.first_name[0] ?? ""}${employee.last_name[0] ?? ""}`.toUpperCase();
+}
 
 export default function DashboardPage() {
   const { user, tenant } = useAuthStore();
-  const [approvedList, setApprovedList] = useState<string[]>([]);
-  const [rejectedList, setRejectedList] = useState<string[]>([]);
+  const [dashboard, setDashboard] = useState<DashboardResponse | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [availableDashboards, setAvailableDashboards] = useState<DashboardView[]>([]);
+  const [selectedDashboard, setSelectedDashboard] = useState<DashboardView>("admin");
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const canOpenAnyDashboard = availableDashboards.length > 0;
+  const firstName = user?.name?.split(" ")[0] || "there";
+  const filteredEmployees = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return employees.slice(0, 8);
+    return employees
+      .filter((employee) =>
+        `${employee.first_name} ${employee.last_name} ${employee.email} ${employee.department_name ?? ""}`
+          .toLowerCase()
+          .includes(term),
+      )
+      .slice(0, 8);
+  }, [employees, query]);
 
-  const firstName = user?.name ? user.name.split(" ")[0] : "Admin";
-  const workspaceName = tenant?.name || "Company";
-  const primaryRole = user?.roles?.[0] || "Employee";
-  const isOwner = user?.roles?.some((role) => role.toLowerCase().includes("owner")) ?? false;
-  const isPeopleManager = user?.roles?.some((role) => role.toLowerCase().includes("people manager")) ?? false;
-  const isDepartmentManager = user?.roles?.some((role) => role.toLowerCase().includes("department manager")) ?? false;
-  const isEmployee = user?.roles?.includes("Employee") && !isOwner && !isPeopleManager && !isDepartmentManager;
+  useEffect(() => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
 
-  if (isEmployee) {
+    let active = true;
+    api<AvailableDashboardsResponse>("GET", "/dashboards/me")
+      .then((available) => {
+        if (!active) return;
+        setAvailableDashboards(available.dashboards);
+        setSelectedDashboard(available.default || "employee");
+        setError(null);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Could not load the admin dashboard.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!selectedDashboard || !availableDashboards.length) return;
+    let active = true;
+    setLoading(true);
+    Promise.all([
+      api<DashboardResponse>("GET", `/dashboards/${selectedDashboard}`),
+      api<EmployeesResponse>("GET", "/employees?limit=100"),
+    ])
+      .then(([dashboardResponse, employeesResponse]) => {
+        if (!active) return;
+        setDashboard(dashboardResponse);
+        setEmployees(employeesResponse.items);
+        setError(null);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : "Could not load the dashboard.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedDashboard, availableDashboards.length]);
+
+  if (loading && !availableDashboards.length) {
     return (
-      <div className="mx-auto max-w-5xl space-y-6">
-        <div className="border-b border-border pb-6">
-          <h1 className="text-2xl font-bold text-foreground">{greeting}, {firstName} 👋</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Manage your leave, policies, tasks, and department colleagues.</p>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Link href="/leave" className="rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary"><Calendar className="h-5 w-5 text-primary" /><p className="mt-3 font-semibold">My leave</p><p className="mt-1 text-sm text-muted-foreground">Request leave and view balances.</p></Link>
-          <Link href="/tasks" className="rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary"><CheckCircle2 className="h-5 w-5 text-primary" /><p className="mt-3 font-semibold">My tasks</p><p className="mt-1 text-sm text-muted-foreground">View manager-assigned work.</p></Link>
-          <Link href="/policies" className="rounded-xl border border-border bg-card p-5 transition-colors hover:border-primary"><Briefcase className="h-5 w-5 text-primary" /><p className="mt-3 font-semibold">Policies</p><p className="mt-1 text-sm text-muted-foreground">Read published company policies.</p></Link>
-        </div>
+      <div className="mx-auto max-w-5xl">
+        <Card className="border-primary/20 bg-primary-soft">
+          <p className="text-sm text-muted-foreground">Loading your workspace dashboard...</p>
+        </Card>
       </div>
     );
   }
 
-  const handleApprove = (name: string) => {
-    setApprovedList((prev) => [...prev, name]);
-  };
+  if (error && !availableDashboards.length) {
+    return (
+      <div className="mx-auto max-w-5xl">
+        <Card className="border-danger/30 bg-danger-soft">
+          <ShieldCheck className="h-6 w-6 text-danger" />
+          <h1 className="mt-4 text-2xl font-bold">Dashboard could not be loaded</h1>
+          <p className="mt-2 text-sm text-muted-foreground">{error}</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Refresh the page after confirming the backend is running and your session is valid.
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
-  const handleReject = (name: string) => {
-    setRejectedList((prev) => [...prev, name]);
-  };
+  if (!canOpenAnyDashboard) {
+    return (
+      <div className="mx-auto max-w-5xl">
+        <Card className="border-primary/20 bg-primary-soft">
+          <ShieldCheck className="h-6 w-6 text-primary" />
+          <h1 className="mt-4 text-2xl font-bold">Welcome back, {firstName}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Your workspace dashboard is not available for this role yet. Open My Space to manage your personal HR tasks.
+          </p>
+          <Link href="/me" className="mt-5 inline-flex">
+            <Button>Open My Space <ArrowUpRight className="h-4 w-4" /></Button>
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
-  const approvals = [
-    { name: "Rahul Mehta", type: "Annual Leave", dates: "Nov 12–14", urgent: false },
-    { name: "Priya Singh", type: "WFH Request", dates: "Oct 25", urgent: true },
-    { name: "Amit Kumar", type: "Attendance Correction", dates: "Oct 18", urgent: false },
-  ];
+  const activeEmployees = dashboard?.widgets.kpis?.active_employees ?? tenant?.employee_count ?? 0;
+  const pendingInvites = employees.filter((employee) => employee.invitation_status !== "active").length;
+  const onboarding = employees.filter((employee) => employee.status === "onboarding").length;
+  const departments = new Set(employees.map((employee) => employee.department_name).filter(Boolean)).size;
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
-      {/* Greeting Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-6">
+    <div className="mx-auto max-w-7xl space-y-8">
+      <header className="flex flex-col justify-between gap-5 border-b border-border pb-6 lg:flex-row lg:items-end">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-              {greeting}, {firstName} 👋
-            </h1>
-            <span className="rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-semibold text-primary">
-              {workspaceName}
+          <div className="mb-2 flex items-center gap-2">
+            <span className="rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary">
+              {selectedDashboard} dashboard
             </span>
+            <span className="text-xs text-muted-foreground">{tenant?.name || "Workspace"}</span>
           </div>
-          <p className="text-sm text-muted-foreground">
-            {new Date().toLocaleDateString("en-US", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
-            {" "}· Here is what is happening across your workspace today.
+          <h1 className="text-3xl font-bold tracking-tight">Good morning, {firstName}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Here is how your organization is doing today.
           </p>
         </div>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-            <ShieldCheck className="h-3.5 w-3.5 text-success" />
-            <span>Role: <strong className="text-foreground">{primaryRole}</strong></span>
-          </div>
-
-          {(isOwner || isPeopleManager || isDepartmentManager) && (
-            <div className="rounded-xl border border-primary/20 bg-primary-soft p-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">
-                    {isOwner ? "Company owner workspace" : isPeopleManager ? "People manager workspace" : "Department manager workspace"}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {isOwner ? "Manage the complete organization, departments, people, roles, and HR operations." : isPeopleManager ? "Manage people and employment details within your department." : "Review your department and manage permitted employee information."}
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  {(isOwner || isPeopleManager) && <Link href="/employees" className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">Manage people</Link>}
-                  <Link href="/organization/departments" className="rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground">View organization</Link>
-                </div>
-              </div>
-            </div>
-          )}
+        <div className="flex flex-wrap gap-2">
+          <Link href="/employees">
+            <Button variant="secondary"><Users className="h-4 w-4" /> Manage employees</Button>
+          </Link>
+          <Link href="/employees/new">
+            <Button><UserPlus className="h-4 w-4" /> Add employee</Button>
+          </Link>
         </div>
-      </div>
+      </header>
 
-      {/* Stat Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          {
-            label: "Total Employees",
-            value: tenant?.employee_count || 142,
-            sub: "+4 this month",
-            icon: Users,
-            color: "text-primary",
-            bg: "bg-primary-soft",
-          },
-          {
-            label: "On Leave Today",
-            value: "7",
-            sub: "3 pending requests",
-            icon: Calendar,
-            color: "text-warning",
-            bg: "bg-warning-soft",
-          },
-          {
-            label: "Present Today",
-            value: "128",
-            sub: "90.1% attendance",
-            icon: Clock,
-            color: "text-success",
-            bg: "bg-success-soft",
-          },
-          {
-            label: "Open Positions",
-            value: "5",
-            sub: "12 applications",
-            icon: Briefcase,
-            color: "text-ai",
-            bg: "bg-ai-soft",
-          },
-        ].map((stat) => (
-          <div
-            key={stat.label}
-            className="rounded-xl border border-border bg-card p-5 shadow-sm transition-all hover:border-border-strong hover:shadow-md"
+      <div className="flex flex-wrap gap-2 rounded-xl border border-border bg-card p-2">
+        {availableDashboards.map((view) => (
+          <button
+            key={view}
+            onClick={() => setSelectedDashboard(view)}
+            className={`rounded-lg px-3 py-2 text-sm font-medium capitalize transition-colors ${
+              selectedDashboard === view
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+            }`}
           >
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {stat.label}
-              </span>
-              <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${stat.bg}`}>
-                <stat.icon className={`h-4 w-4 ${stat.color}`} />
-              </div>
-            </div>
-            <p className="text-3xl font-bold font-mono tracking-tight text-foreground">
-              {stat.value}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {stat.sub}
-            </p>
-          </div>
+            {view} dashboard
+          </button>
         ))}
       </div>
 
-      {/* Two-column layout: AI Assistant Suggestions + Approvals */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* AI Assistant Suggestions */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-ai-soft">
-              <Sparkles className="h-4 w-4 text-ai" />
-            </div>
+      {error && (
+        <Card className="border-danger/30 bg-danger-soft">
+          <p className="text-sm font-medium text-danger">{error}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Refresh the page after checking that the backend is running.</p>
+        </Card>
+      )}
+
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Active employees" value={loading ? "—" : activeEmployees} sub="Company-wide headcount" />
+        <StatCard label="Departments" value={loading ? "—" : departments} sub="With people assigned" />
+        <StatCard label="Onboarding" value={loading ? "—" : onboarding} sub="New joiners in progress" />
+        <StatCard label="Pending invites" value={loading ? "—" : pendingInvites} sub="Need workspace access" />
+      </section>
+
+      {dashboard && (
+        <section className="grid gap-4 md:grid-cols-2">
+          {(["hiring_funnel", "people_cost"] as const).map((widget) => (
+            dashboard.widgets[widget]?.status === "not_available" && (
+              <Card key={widget} className="border-dashed bg-muted/30">
+                <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  {widget === "hiring_funnel" ? "Hiring funnel" : "People cost"}
+                </p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  This widget will appear when the related module is available.
+                </p>
+                <span className="mt-3 inline-flex rounded-full bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground">
+                  Not available
+                </span>
+              </Card>
+            )
+          ))}
+        </section>
+      )}
+
+      <section className="grid gap-6 lg:grid-cols-[1.4fr_0.8fr]">
+        <Card className="p-0">
+          <div className="flex flex-col gap-3 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-base font-semibold text-foreground">
-                AI Assistant Quick Actions
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Ask in plain English or trigger routine actions
-              </p>
+              <h2 className="font-semibold">Employees</h2>
+              <p className="mt-1 text-sm text-muted-foreground">People currently in your workspace.</p>
+            </div>
+            <Link href="/employees" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
+              View all <ChevronRight className="h-4 w-4" />
+            </Link>
+          </div>
+          <div className="border-b border-border p-4">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search employees..." className="pl-9" />
             </div>
           </div>
-
-          <div className="space-y-2.5">
-            {[
-              "How many leave days do I have left this year?",
-              "Show me all requests waiting for my approval",
-              "Summarize today's team attendance and late arrivals",
-              "Start an onboarding workflow for a new engineering hire",
-            ].map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => alert(`AI command: "${prompt}" (Demo preview)`)}
-                className="group flex w-full items-center justify-between rounded-lg border border-border bg-surface px-4 py-3 text-left text-xs font-medium text-foreground transition-all hover:border-ai/40 hover:bg-ai-soft/30 hover:text-ai"
-              >
-                <span>{prompt}</span>
-                <ArrowUpRight className="h-3.5 w-3.5 opacity-40 transition-opacity group-hover:opacity-100" />
-              </button>
+          <div className="divide-y divide-border">
+            {loading ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Loading employees...</div>
+            ) : filteredEmployees.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">No employees found.</div>
+            ) : filteredEmployees.map((employee) => (
+              <Link key={employee.id} href={`/employees/${employee.id}`} className="flex items-center gap-3 px-5 py-4 transition-colors hover:bg-muted/40">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-bold text-primary">
+                  {initials(employee)}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{employee.first_name} {employee.last_name}</p>
+                  <p className="truncate text-xs text-muted-foreground">{employee.designation || "No designation"} · {employee.department_name || "No department"}</p>
+                </div>
+                <div className="hidden text-right sm:block">
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold capitalize ${statusStyles[employee.status]}`}>
+                    {employee.status.replace("_", " ")}
+                  </span>
+                  <p className={`mt-1 text-[11px] ${invitationStyles[employee.invitation_status]}`}>
+                    {employee.invitation_status === "not_invited" ? "Not invited" : employee.invitation_status}
+                  </p>
+                </div>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
             ))}
           </div>
-        </div>
+        </Card>
 
-        {/* Pending Approvals */}
-        <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-soft">
-                <CheckCircle2 className="h-4 w-4 text-primary" />
-              </div>
+        <div className="space-y-6">
+          <Card>
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-warning-soft text-warning"><Clock3 className="h-5 w-5" /></div>
               <div>
-                <h2 className="text-base font-semibold text-foreground">
-                  Waiting on Your Approval
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  Human-in-the-loop review required
-                </p>
+                <h2 className="font-semibold">Needs attention</h2>
+                <p className="text-sm text-muted-foreground">Keep your workspace moving.</p>
               </div>
             </div>
-            <span className="rounded-full bg-warning-soft px-2.5 py-0.5 text-xs font-semibold text-warning">
-              {approvals.filter((a) => !approvedList.includes(a.name) && !rejectedList.includes(a.name)).length} pending
-            </span>
-          </div>
+            <div className="mt-5 space-y-3">
+              <Link href="/employees" className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/40">
+                <span className="flex items-center gap-2 text-sm"><UserPlus className="h-4 w-4 text-primary" /> Pending invitations</span>
+                <span className="font-mono text-sm font-semibold">{pendingInvites}</span>
+              </Link>
+              <Link href="/organization/departments" className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/40">
+                <span className="flex items-center gap-2 text-sm"><Building2 className="h-4 w-4 text-primary" /> Review departments</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
+              <Link href="/audit" className="flex items-center justify-between rounded-lg border border-border p-3 hover:bg-muted/40">
+                <span className="flex items-center gap-2 text-sm"><CheckCircle2 className="h-4 w-4 text-success" /> Open audit log</span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              </Link>
+            </div>
+          </Card>
 
-          <div className="divide-y divide-border">
-            {approvals.map((item) => {
-              const isApproved = approvedList.includes(item.name);
-              const isRejected = rejectedList.includes(item.name);
+          <Card>
+            <h2 className="font-semibold">Quick actions</h2>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Link href="/employees/new" className="rounded-lg border border-border p-3 text-sm hover:bg-muted/40"><FilePlus2 className="mb-2 h-4 w-4 text-primary" />Add employee</Link>
+              <Link href="/organization/departments" className="rounded-lg border border-border p-3 text-sm hover:bg-muted/40"><Building2 className="mb-2 h-4 w-4 text-primary" />Departments</Link>
+              <Link href="/reports" className="rounded-lg border border-border p-3 text-sm hover:bg-muted/40"><BarChart3 className="mb-2 h-4 w-4 text-primary" />Reports</Link>
+              <Link href="/settings/general" className="rounded-lg border border-border p-3 text-sm hover:bg-muted/40"><Settings2 className="mb-2 h-4 w-4 text-primary" />Settings</Link>
+            </div>
+          </Card>
+        </div>
+      </section>
 
-              return (
-                <div
-                  key={item.name}
-                  className="flex items-center justify-between py-3.5 first:pt-0 last:pb-0"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {item.name.split(" ").map((n) => n[0]).join("")}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground">{item.name}</p>
-                        {item.urgent && (
-                          <span className="rounded bg-danger-soft px-1.5 py-0.5 text-[10px] font-semibold text-danger">
-                            Urgent
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {item.type} · {item.dates}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    {isApproved ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-success-soft px-2.5 py-1 text-xs font-semibold text-success">
-                        <Check className="h-3.5 w-3.5" /> Approved
-                      </span>
-                    ) : isRejected ? (
-                      <span className="inline-flex items-center gap-1 rounded-md bg-danger-soft px-2.5 py-1 text-xs font-semibold text-danger">
-                        <X className="h-3.5 w-3.5" /> Declined
-                      </span>
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => handleApprove(item.name)}
-                          className="flex items-center gap-1 rounded-lg bg-success px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-opacity hover:opacity-90"
-                        >
-                          <Check className="h-3.5 w-3.5" /> Approve
-                        </button>
-                        <button
-                          onClick={() => handleReject(item.name)}
-                          className="flex items-center justify-center rounded-lg border border-border bg-surface p-1.5 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger"
-                          title="Reject"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      <Card className="flex flex-col gap-3 border-primary/20 bg-primary-soft sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <CalendarDays className="h-5 w-5 text-primary" />
+          <div>
+            <p className="text-sm font-semibold">HR operations at a glance</p>
+            <p className="text-xs text-muted-foreground">Use the People, Attendance, Leave and Reports sections for detailed workflows.</p>
           </div>
         </div>
-      </div>
+        <Link href="/reports" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">Open reports <ArrowUpRight className="h-4 w-4" /></Link>
+      </Card>
     </div>
   );
 }

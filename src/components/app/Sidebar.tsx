@@ -24,6 +24,7 @@ const navSections = [
     label: "PEOPLE",
     items: [
       { href: "/employees", label: "People", icon: Users, perm: "employees.read" },
+      { href: "/directory", label: "Directory", icon: Users, perm: "directory.read" },
       { href: "/organization/departments", label: "Organization", icon: Building2, perm: "tenant.read" },
       ...(process.env.NEXT_PUBLIC_FEATURE_TEAMS === "true" ? [{ href: "/organization/teams", label: "Teams", icon: Users, perm: "teams.read" }] : []),
       { href: "/attendance", label: "Attendance", icon: Clock, perm: "attendance.read" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import { useAuthStore, type AuthUser, type Tenant } from "@/store/authStore";
@@ -18,6 +18,7 @@ type MeResponse = {
 
 export function useSession(requireAuth: boolean = true) {
   const { user, tenant, accessToken, isAuthenticated, isLoading, setSession, clearSession, initSession } = useAuthStore();
+  const refreshedToken = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -43,8 +44,10 @@ export function useSession(requireAuth: boolean = true) {
       return;
     }
 
-    // Refresh profile in background if we have a token
-    if (accessToken && (!user || !tenant)) {
+    // Always refresh the authorization profile once per token. This prevents
+    // stale localStorage permissions from hiding newly granted dashboard access.
+    if (accessToken && refreshedToken.current !== accessToken) {
+      refreshedToken.current = accessToken;
       api<MeResponse>("GET", "/auth/me")
         .then((res) => {
           const authUser: AuthUser = res.user || {
@@ -72,10 +75,11 @@ export function useSession(requireAuth: boolean = true) {
           setSession(authUser, authTenant, accessToken);
         })
         .catch((err) => {
+          refreshedToken.current = null;
           console.warn("Failed to fetch /auth/me:", err);
         });
     }
-  }, [isAuthenticated, isLoading, requireAuth, pathname, accessToken, user, tenant, router, setSession]);
+  }, [isAuthenticated, isLoading, requireAuth, pathname, accessToken, router, setSession]);
 
   const logout = () => {
     clearSession();

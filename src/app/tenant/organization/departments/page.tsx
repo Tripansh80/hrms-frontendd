@@ -43,11 +43,11 @@ function initials(name: string) {
 
 export default function DepartmentsPage() {
   const { user } = useAuthStore();
-  const canManage = user?.permissions.includes("tenant.update") ?? false;
+  const canManage = user?.permissions.includes("departments.manage") ?? false;
   const canViewDepartmentEmployees = user?.permissions.includes("employees.read") ?? false;
   const canManageEmployees = canViewDepartmentEmployees && (
     user?.permissions.includes("employees.update") ||
-    user?.roles.some((role) => ["Department Manager", "People Manager", "Tenant Owner"].includes(role)) === true
+    user?.permissions.includes("departments.manage")
   );
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);

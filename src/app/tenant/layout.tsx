@@ -129,7 +129,9 @@ export default function TenantLayout({ children }: { children: ReactNode }) {
   const workspaceName = tenant?.name || "Workspace";
   const userName = user?.name || user?.email?.split("@")[0] || "User";
   const userInitials = userName.substring(0, 2).toUpperCase();
-  const isEmployee = user?.roles?.some((role) => role === "Employee") && !user?.roles?.some((role) => ["Tenant Owner", "HR Admin", "HR Manager", "Department Manager", "People Manager"].includes(role));
+  const isEmployee = !user?.permissions.some((permission) =>
+    ["dashboard.admin", "dashboard.hr", "dashboard.manager"].includes(permission)
+  );
 
   const navSections = [
     {
@@ -144,6 +146,7 @@ export default function TenantLayout({ children }: { children: ReactNode }) {
       label: "PEOPLE",
       items: [
         { href: "/employees", label: "People", icon: Users },
+        { href: "/directory", label: "Directory", icon: Users },
         { href: "/organization/departments", label: "Organization", icon: Building2 },
         { href: "/attendance", label: "Attendance", icon: Clock },
         { href: "/leave", label: "Leave", icon: CalendarDays },

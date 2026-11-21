@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { setAccessToken } from "@/lib/api";
 
-export type DataScope = "all" | "department" | "team" | "self";
+export type DataScope = "all" | "managed" | "department" | "team" | "self";
 export type Permission = string;
 
 export type AuthUser = {

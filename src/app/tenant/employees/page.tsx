@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { BadgeCheck, BriefcaseBusiness, ClipboardPlus, Mail, Pencil, Plus, Search, Send, ShieldAlert, Trash2, Users, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { BriefcaseBusiness, ClipboardPlus, Mail, Pencil, Plus, Search, Send, ShieldAlert, Trash2, Users, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/ui/Button";
@@ -27,6 +28,7 @@ type Employee = {
   department_name: string | null;
   manager_first_name: string | null;
   manager_last_name: string | null;
+  is_owner: boolean;
   invitation_status: "not_invited" | "invited" | "active";
 };
 
@@ -44,21 +46,23 @@ const statusStyles: Record<Employee["status"], string> = {
 
 const today = new Date().toISOString().slice(0, 10);
 
-function HierarchyNode({ employee, children }: { employee: Employee; children: Employee[] }) {
+type HierarchyEmployee = Employee & { children: HierarchyEmployee[] };
+
+function HierarchyNode({ employee }: { employee: HierarchyEmployee }) {
   return (
     <div className="relative">
-      <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-4 py-3">
+      <div className={`flex items-center gap-3 rounded-lg border bg-card px-4 py-3 ${employee.is_owner ? "border-primary/50 ring-1 ring-primary/20" : "border-border"}`}>
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-bold text-primary">
           {employee.first_name[0]}{employee.last_name[0] || ""}
         </div>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{employee.first_name} {employee.last_name}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{employee.first_name} {employee.last_name}{employee.is_owner && <span className="ml-2 text-xs font-medium text-primary">Company owner</span>}</p>
           <p className="truncate text-xs text-muted-foreground">{employee.designation || "No designation"} · {employee.employee_no}</p>
         </div>
       </div>
-      {children.length > 0 && (
+      {employee.children.length > 0 && (
         <div className="ml-6 mt-2 space-y-2 border-l border-border pl-5">
-          {children.map((child) => <HierarchyNode key={child.id} employee={child} children={[]} />)}
+          {employee.children.map((child) => <HierarchyNode key={child.id} employee={child} />)}
         </div>
       )}
     </div>
@@ -66,6 +70,7 @@ function HierarchyNode({ employee, children }: { employee: Employee; children: E
 }
 
 export default function PeoplePage() {
+  const router = useRouter();
   const { user } = useAuthStore();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -143,8 +148,16 @@ export default function PeoplePage() {
         childrenByManager.set(managerId, children);
       }
     });
-    return visibleEmployees.filter((employee) => !Array.from(childrenByManager.values()).some((children) => children.some((child) => child.id === employee.id)))
-      .map((employee) => ({ employee, children: childrenByManager.get(employee.id) || [] }));
+
+    const buildNode = (employee: Employee): HierarchyEmployee => ({
+      ...employee,
+      children: (childrenByManager.get(employee.id) || []).map(buildNode),
+    });
+
+    return visibleEmployees
+      .filter((employee) => !Array.from(childrenByManager.values()).some((children) => children.some((child) => child.id === employee.id)))
+      .sort((left, right) => Number(right.is_owner) - Number(left.is_owner))
+      .map(buildNode);
   }, [visibleEmployees]);
 
   const closeCreate = () => {
@@ -246,12 +259,63 @@ export default function PeoplePage() {
 
       <div className="mb-6 grid gap-4 sm:grid-cols-3"><StatCard label="Total people" value={employees.length} sub="Visible within your access scope" /><StatCard label="Active" value={activeCount} sub="Currently active employees" /><StatCard label="Onboarding" value={onboardingCount} sub="New people joining the team" /></div>
 
-      {!loading && hierarchy.length > 0 && <Card className="mb-6"><div className="mb-4 flex items-center gap-2"><Users className="h-5 w-5 text-primary" /><h2 className="font-semibold">People hierarchy</h2></div><div className="grid gap-3 md:grid-cols-2">{hierarchy.map(({ employee, children }) => <HierarchyNode key={employee.id} employee={employee} children={children} />)}</div></Card>}
+      {!loading && hierarchy.length > 0 && <Card className="mb-6"><div className="mb-4 flex items-center gap-2"><Users className="h-5 w-5 text-primary" /><h2 className="font-semibold">People hierarchy</h2></div><div className="grid gap-3 md:grid-cols-2">{hierarchy.map((employee) => <HierarchyNode key={employee.id} employee={employee} />)}</div></Card>}
 
       <Card className="p-0">
-        <div className="flex flex-col gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Users className="h-5 w-5 text-primary" /><h2 className="font-semibold">People directory</h2></div><div className="relative w-full sm:w-72"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people" className="pl-9" /></div></div>
+        <div className="flex flex-col gap-4 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2"><Users className="h-5 w-5 text-primary" /><h2 className="font-semibold">People directory</h2></div>
+            <p className="mt-1 text-sm text-muted-foreground">Select a person to view their full profile.</p>
+          </div>
+          <div className="relative w-full sm:w-80">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name, email, or ID" className="pl-9" />
+          </div>
+        </div>
         {error && <div className="m-5 rounded-lg border border-danger/20 bg-danger-soft px-4 py-3 text-sm text-danger">{error}</div>}
-        {loading ? <p className="p-8 text-sm text-muted-foreground">Loading people...</p> : visibleEmployees.length === 0 ? <div className="p-12 text-center"><Users className="mx-auto h-9 w-9 text-muted-foreground" /><h3 className="mt-3 font-semibold">No people found</h3><p className="mt-1 text-sm text-muted-foreground">Add a person to start building your workspace directory.</p></div> :         <div className="divide-y divide-border">{visibleEmployees.map((employee) => <div key={employee.id} className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/50"><div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-soft text-sm font-bold text-primary">{employee.first_name[0]}{employee.last_name[0] || ""}</div><div className="min-w-0 flex-1"><p className="truncate font-medium text-foreground">{employee.first_name} {employee.last_name}</p><p className="mt-1 flex items-center gap-1.5 truncate text-xs text-muted-foreground"><Mail className="h-3.5 w-3.5" />{employee.email}</p></div><div className="hidden min-w-36 sm:block"><p className="flex items-center gap-1.5 text-sm text-foreground"><BriefcaseBusiness className="h-3.5 w-3.5 text-muted-foreground" />{employee.designation || "No designation"}</p><p className="mt-1 font-mono text-[11px] text-muted-foreground">{employee.employee_no}</p><p className="mt-1 text-xs text-muted-foreground">{employee.department_name || "No department"}{employee.manager_first_name ? ` · Reports to ${employee.manager_first_name} ${employee.manager_last_name || ""}` : ""}</p></div>        {invitationsEnabled && <div className="hidden md:block"><span className="rounded-full bg-muted px-2.5 py-1 text-xs font-semibold capitalize">{employee.invitation_status.replace("_", " ")}</span></div>}<span className={`hidden rounded-full px-2.5 py-1 text-xs font-semibold capitalize md:inline-flex ${statusStyles[employee.status]}`}><BadgeCheck className="mr-1 h-3.5 w-3.5" />{employee.status.replace("_", " ")}</span>{invitationsEnabled && employee.invitation_status === "not_invited" && user?.permissions.includes("employees.update") && <button onClick={() => inviteEmployee(employee)} title="Send invitation" className="rounded-lg p-2 text-muted-foreground hover:bg-primary-soft hover:text-primary"><Send className="h-4 w-4" /></button>}{canAssignTasks && <button onClick={() => setTaskEmployee(employee)} title="Assign task" className="rounded-lg p-2 text-muted-foreground hover:bg-primary-soft hover:text-primary"><ClipboardPlus className="h-4 w-4" /></button>}{user?.permissions.includes("employees.update") && <button onClick={() => openEdit(employee)} title={`Edit ${employee.first_name}`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary-soft hover:text-primary"><Pencil className="h-4 w-4" /></button>}{canDelete && <button onClick={() => deleteEmployee(employee)} disabled={deletingId === employee.id} title={`Remove ${employee.first_name}`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>}</div>)}</div>}
+        {loading ? <p className="p-8 text-sm text-muted-foreground">Loading people...</p> : visibleEmployees.length === 0 ? <div className="p-12 text-center"><Users className="mx-auto h-9 w-9 text-muted-foreground" /><h3 className="mt-3 font-semibold">No people found</h3><p className="mt-1 text-sm text-muted-foreground">Add a person to start building your workspace directory.</p></div> :
+          <div className="grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+            {visibleEmployees.map((employee) => (
+              <article
+                key={employee.id}
+                role="link"
+                tabIndex={0}
+                onClick={() => router.push(`/employees/${employee.id}`)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") router.push(`/employees/${employee.id}`);
+                }}
+                className={`group cursor-pointer rounded-xl border bg-card p-5 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40 ${employee.is_owner ? "border-primary/40" : "border-border"}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary-soft font-semibold text-primary">
+                      {employee.first_name[0]}{employee.last_name[0] || ""}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate font-semibold text-foreground">{employee.first_name} {employee.last_name}</h3>
+                      <p className="truncate text-xs text-muted-foreground">{employee.employee_no}</p>
+                    </div>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold capitalize ${statusStyles[employee.status]}`}>{employee.status.replace("_", " ")}</span>
+                </div>
+                <div className="mt-5 space-y-2 text-sm">
+                  <p className="flex items-center gap-2 truncate text-foreground"><BriefcaseBusiness className="h-4 w-4 shrink-0 text-muted-foreground" />{employee.designation || "No designation"}</p>
+                  <p className="flex items-center gap-2 truncate text-muted-foreground"><Mail className="h-4 w-4 shrink-0" />{employee.email}</p>
+                  <p className="truncate text-xs text-muted-foreground">{employee.department_name || "No department"}{employee.manager_first_name ? ` · Reports to ${employee.manager_first_name} ${employee.manager_last_name || ""}` : ""}</p>
+                </div>
+                {employee.is_owner && <p className="mt-4 text-xs font-semibold text-primary">Company owner</p>}
+                <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
+                  <span className="text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">View profile</span>
+                  <div className="ml-auto flex items-center gap-1">
+                    {invitationsEnabled && employee.invitation_status === "not_invited" && user?.permissions.includes("employees.update") && <button onClick={(event) => { event.stopPropagation(); inviteEmployee(employee); }} title="Send invitation" className="rounded-lg p-2 text-muted-foreground hover:bg-primary-soft hover:text-primary"><Send className="h-4 w-4" /></button>}
+                    {canAssignTasks && <button onClick={(event) => { event.stopPropagation(); setTaskEmployee(employee); }} title="Assign task" className="rounded-lg p-2 text-muted-foreground hover:bg-primary-soft hover:text-primary"><ClipboardPlus className="h-4 w-4" /></button>}
+                    {user?.permissions.includes("employees.update") && <button onClick={(event) => { event.stopPropagation(); openEdit(employee); }} title={`Edit ${employee.first_name}`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-primary-soft hover:text-primary"><Pencil className="h-4 w-4" /></button>}
+                    {canDelete && <button onClick={(event) => { event.stopPropagation(); deleteEmployee(employee); }} disabled={deletingId === employee.id} title={`Remove ${employee.first_name}`} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-danger-soft hover:text-danger disabled:opacity-50"><Trash2 className="h-4 w-4" /></button>}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>}
       </Card>
 
       {taskEmployee && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4"><form onSubmit={saveTask} className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl"><h2 className="text-lg font-semibold">Assign task</h2><p className="mt-1 text-sm text-muted-foreground">Assigning to {taskEmployee.first_name} {taskEmployee.last_name}</p><div className="mt-5 space-y-4"><label className="block text-sm font-medium">Task title<Input required value={taskForm.title} onChange={(event) => setTaskForm({ ...taskForm, title: event.target.value })} /></label><label className="block text-sm font-medium">Description<textarea value={taskForm.description} onChange={(event) => setTaskForm({ ...taskForm, description: event.target.value })} className="mt-1.5 min-h-24 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm" /></label><label className="block text-sm font-medium">Due date<Input type="date" value={taskForm.due_date} onChange={(event) => setTaskForm({ ...taskForm, due_date: event.target.value })} /></label></div><div className="mt-6 flex justify-end gap-3"><Button type="button" variant="secondary" onClick={() => setTaskEmployee(null)}>Cancel</Button><Button type="submit" disabled={taskSaving}>{taskSaving ? "Assigning..." : "Assign task"}</Button></div></form></div>}
